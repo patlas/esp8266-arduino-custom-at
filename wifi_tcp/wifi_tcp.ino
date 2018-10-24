@@ -6,6 +6,9 @@ const char* password = "huramamyinternety";
 
 String arg_tab[4];
 unsigned char buff[512];
+unsigned char buff_r[512];
+unsigned int rsize = 0;
+unsigned int rtail = 0;
 
 WiFiClient client;
 
@@ -123,9 +126,34 @@ bool disconnect_tcp(String *argvector) {
   return true;
 }
 
+bool clear(String *argvector) {
+  (void) argvector;
+  memset(buff_r, 0, 512);
+  rsize = 0;
+  rtail = 0;
+  return true;
+}
+
+bool receive_stream(String *argvector) {
+  unsigned int len = argvector[1].toInt();
+  if(len == 0) {
+    len = rsize;
+    rsize = 0;
+    rtail = 0;
+    return true;
+  }
+  if(len == Serial.write(&buff_r[rtail], len)) {
+    rtail += len;
+    return true;
+  }
+
+  return false;
+}
+
 bool send_stream(String *argvector) {
   unsigned int len = argvector[1].toInt();
   if(read_stream(buff, len)) {
+    clear(NULL);
     int written = client.write(buff, len);
 //    Serial.print("Written: ");
 //    Serial.println(written);
@@ -157,27 +185,67 @@ bool execute_cmd(String *argvector) {
   else if(argvector[0].equals("send_stream")) {
     return send_stream(argvector);
   }
+  else if(argvector[0].equals("receive_stream")) {
+    return receive_stream(argvector);
+  }
+  else if(argvector[0].equals("clear")) {
+    return clear(argvector);
+  }
   else {
     return false;
   }
 }
 
+String *str = new String();
+String *cmd_vector;
 
+int rbyte = 0;
+bool cr = false;
+bool special_char = false;
+long int s=0;
 
 void loop() {
-  String *str = new String();
-  String *cmd_vector;
-  if(read_cmd(str)) {
-//    Serial.println("Odebralem");
-//    Serial.println(*str);
-    cmd_vector = parse_cmd(str);
-//    Serial.println("Parsowanie");
-    if(execute_cmd(cmd_vector)) {
-      Serial.print("OK\r\n");
+
+  if(Serial.available() > 0) {
+    rbyte = Serial.read();
+    if(rbyte == '\r') {
+      cr = true;
+      special_char = true;
     }
-    else {
-      Serial.print("ERROR\r\n");
+    else if(rbyte == '\n' && cr == true) {
+      // has received complete command -> invoke it
+      cmd_vector = parse_cmd(str);
+
+      if(execute_cmd(cmd_vector)) {
+        Serial.print("OK\r\n");
+      }
+      else {
+        Serial.print("ERROR\r\n");
+      }
+      delete str;
+      str = new String();
+      special_char = true;
+    } else {
+      cr = false;
+      special_char = false;
+    }
+    if(!special_char) {
+      *str += (char) rbyte;
     }
   }
+
+  s = client.available();
+  if (s > 0) {
+    if (s + rsize < 512) {
+      client.read(&buff_r[rsize], s);
+      rsize += s;
+    } else {
+      // ugly clean
+      memset(buff_r, 0, 512);
+      rsize = 0;
+      rtail = 0;
+    }
+  }
+
 
 }
